@@ -1,69 +1,508 @@
 <!DOCTYPE html>
 <html lang="th">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>DebtMaster AI Pro</title>
-
-<!-- Dependencies -->
-<script src="https://cdn.tailwindcss.com"></script>
-<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-<script src="https://unpkg.com/lucide@latest"></script>
-
-<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@300;400;600;700;900&display=swap" rel="stylesheet">
-
-<style>
-body { font-family: 'Noto Sans Thai', sans-serif; background:#f8fafc; }
-canvas { max-width:100%!important; }
-@media print {.no-print{display:none}}
-</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DebtMaster AI Pro - แผนปลดหนี้อัจฉริยะ</title>
+    <!-- Dependencies -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@300;400;600;700;900&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Noto Sans Thai', sans-serif; background-color: #f8fafc; color: #1e293b; }
+        canvas { max-width: 100% !important; }
+        .no-print { display: block; }
+        @media print { .no-print { display: none !important; } }
+        .risk-gradient {
+            background: linear-gradient(90deg, #10b981 0%, #f59e0b 50%, #ef4444 100%);
+        }
+        .animate-subtle { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .8; } }
+        input[type="number"]::-webkit-inner-spin-button, 
+        input[type="number"]::-webkit-outer-spin-button { 
+            -webkit-appearance: none; 
+            margin: 0; 
+        }
+    </style>
 </head>
-
 <body>
-<div id="root"></div>
+    <div id="root"></div>
 
-<script type="text/babel">
-const { useState, useEffect, useMemo, useRef } = React;
+    <script type="text/babel">
+        const { useState, useEffect, useMemo, useRef } = React;
 
-const Icon = ({ name, size = 20, className = "" }) => (
-  <i data-lucide={name} className={className}
-     style={{ width: size, height: size, display: "inline-block" }}></i>
-);
+        // --- Optimized Icon Component ---
+        // We use a memoized approach or a fixed initialization to avoid re-rendering issues
+        const Icon = ({ name, size = 20, className = "" }) => {
+            return <i data-lucide={name} className={className} style={{ width: size, height: size, display: 'inline-block' }}></i>;
+        };
 
-const App = () => {
-  /* ========= STATE ========= */
-  const [debts, setDebts] = useState([]);
-  const [income, setIncome] = useState("");
-  const [essential, setEssential] = useState("");
-  const [extraPayment, setExtraPayment] = useState(0);
-  const [strategy, setStrategy] = useState("avalanche");
-  const [tab, setTab] = useState("dashboard");
-  const [premium, setPremium] = useState(false);
+        const App = () => {
+            // --- State ---
+            const [debts, setDebts] = useState([]);
+            const [income, setIncome] = useState("");
+            const [essentialExpenses, setEssentialExpenses] = useState("");
+            const [extraPayment, setExtraPayment] = useState(0);
+            const [activeTab, setActiveTab] = useState('dashboard');
+            const [strategy, setStrategy] = useState('avalanche'); // avalanche, snowball, survival
+            const [isPremium, setIsPremium] = useState(false);
+            
+            const chartRef = useRef(null);
 
-  const chartRef = useRef(null);
+            // --- Icon Initialization (Fixes Focus Issue) ---
+            // Only call lucide.createIcons() when the view changes, not on every input change
+            useEffect(() => {
+                if (window.lucide) {
+                    window.lucide.createIcons();
+                }
+            }, [activeTab, debts.length, isPremium]);
 
-  /* ========= LOAD / SAVE ========= */
-  useEffect(() => {
-    const d = localStorage.getItem("dm_debts");
-    const f = localStorage.getItem("dm_fin");
-    if (d) setDebts(JSON.parse(d));
-    if (f) {
-      const j = JSON.parse(f);
-      setIncome(j.i || "");
-      setEssential(j.e || "");
-      setExtraPayment(j.x || 0);
-    }
-  }, []);
+            // --- Persistence ---
+            useEffect(() => {
+                const savedDebts = localStorage.getItem('debt_pro_data_v2');
+                const savedFinances = localStorage.getItem('debt_pro_finances_v2');
+                if (savedDebts) setDebts(JSON.parse(savedDebts));
+                if (savedFinances) {
+                    const { inc, exp, extra } = JSON.parse(savedFinances);
+                    setIncome(inc || "");
+                    setEssentialExpenses(exp || "");
+                    setExtraPayment(extra || 0);
+                }
+            }, []);
 
-  useEffect(() => {
-    localStorage.setItem("dm_debts", JSON.stringify(debts));
-    localStorage.setItem("dm_fin", JSON.stringify({
-      i: income, e: essential, x: extraPayment
-    }));
-    if (window.lucide) window.lucide.createIcons();
-  }, [debts, income, essential, extraPayment, tab, premium]);
+            useEffect(() => {
+                localStorage.setItem('debt_pro_data_v2', JSON.stringify(debts));
+                localStorage.setItem('debt_pro_finances_v2', JSON.stringify({ inc: income, exp: essentialExpenses, extra: extraPayment }));
+            }, [debts, income, essentialExpenses, extraPayment]);
 
-  /* ========= CALC ========= */
+            // --- Core Calculations ---
+            const numIncome = Number(income) || 0;
+            const numEssential = Number(essentialExpenses) || 0;
+            const totalDebt = useMemo(() => debts.reduce((sum, d) => sum + (Number(d.balance) || 0), 0), [debts]);
+            const totalMinPayment = useMemo(() => debts.reduce((sum, d) => sum + (Number(d.minPayment) || 0), 0), [debts]);
+            const monthlyInterestFlow = useMemo(() => debts.reduce((sum, d) => sum + ((Number(d.balance) || 0) * ((Number(d.interestRate) || 0) / 100) / 12), 0), [debts]);
+            const cashFlowRemaining = numIncome - numEssential - totalMinPayment;
+            const dtiRatio = numIncome > 0 ? ((totalMinPayment / numIncome) * 100).toFixed(1) : 0;
+
+            const getRiskLevel = () => {
+                if (dtiRatio <= 30) return { label: 'ปลอดภัย', color: 'bg-emerald-500', text: 'text-emerald-600', desc: 'ภาระหนี้ของคุณอยู่ในเกณฑ์ดีเยี่ยม' };
+                if (dtiRatio <= 45) return { label: 'เฝ้าระวัง', color: 'bg-amber-500', text: 'text-amber-600', desc: 'เริ่มมีภาระหนี้สูง ควรเริ่มคุมรายจ่าย' };
+                return { label: 'วิกฤต', color: 'bg-rose-500', text: 'text-rose-600', desc: 'เสี่ยงผิดนัดชำระสูงมาก ต้องรีบแก้ไขด่วน' };
+            };
+            const risk = getRiskLevel();
+
+            // --- Payoff Simulation Engine ---
+            const calculatePayoff = (strategyType, monthlyExtra) => {
+                if (debts.length === 0) return { months: 0, totalInterest: 0, timeline: [], totalPaid: 0 };
+                let currentDebts = debts.map(d => ({ ...d, currentBalance: Number(d.balance) || 0 }));
+                let months = 0, totalInterest = 0, totalPaid = 0, timeline = [];
+                const MAX_MONTHS = 480; // 40 years
+
+                if (strategyType === 'snowball') currentDebts.sort((a, b) => a.currentBalance - b.currentBalance);
+                else if (strategyType === 'avalanche') currentDebts.sort((a, b) => (Number(b.interestRate) || 0) - (Number(a.interestRate) || 0));
+
+                while (currentDebts.some(d => d.currentBalance > 0) && months < MAX_MONTHS) {
+                    months++;
+                    let extraAvailable = strategyType === 'survival' ? 0 : Number(monthlyExtra);
+                    let monthlyTotalBalance = 0;
+
+                    // 1. Pay Interest and Minimums
+                    currentDebts.forEach(d => {
+                        if (d.currentBalance > 0) {
+                            const mInterest = (d.currentBalance * ((Number(d.interestRate) || 0) / 100)) / 12;
+                            totalInterest += mInterest;
+                            d.currentBalance += mInterest;
+                            const payment = Math.min(d.currentBalance, Number(d.minPayment) || 0);
+                            d.currentBalance -= payment;
+                            totalPaid += payment;
+                        }
+                    });
+
+                    // 2. Apply Extra
+                    for (let d of currentDebts) {
+                        if (d.currentBalance > 0 && extraAvailable > 0) {
+                            const appliedExtra = Math.min(d.currentBalance, extraAvailable);
+                            d.currentBalance -= appliedExtra;
+                            totalPaid += appliedExtra;
+                            extraAvailable -= appliedExtra;
+                        }
+                        monthlyTotalBalance += d.currentBalance;
+                    }
+                    timeline.push({ month: months, balance: Math.max(0, monthlyTotalBalance) });
+                    if (monthlyTotalBalance <= 0) break;
+                }
+                return { months, totalInterest, timeline, totalPaid };
+            };
+
+            const currentPayoff = useMemo(() => calculatePayoff(strategy, extraPayment), [debts, strategy, extraPayment]);
+            const noExtraPayoff = useMemo(() => calculatePayoff('survival', 0), [debts]);
+            const interestSaved = Math.max(0, noExtraPayoff.totalInterest - currentPayoff.totalInterest);
+
+            // --- Charts ---
+            useEffect(() => {
+                const ctx = document.getElementById('timelineChart')?.getContext('2d');
+                if (ctx && debts.length > 0) {
+                    if (chartRef.current) chartRef.current.destroy();
+                    chartRef.current = new Chart(ctx, {
+                        type: 'line',
+                        data: {
+                            labels: currentPayoff.timeline.map(t => `ด.${t.month}`),
+                            datasets: [{
+                                label: 'ยอดหนี้คงเหลือ',
+                                data: currentPayoff.timeline.map(t => t.balance),
+                                borderColor: '#4f46e5',
+                                fill: true,
+                                backgroundColor: 'rgba(79, 70, 229, 0.05)',
+                                tension: 0.4,
+                                pointRadius: 0
+                            }]
+                        },
+                        options: { 
+                            responsive: true, 
+                            maintainAspectRatio: false, 
+                            scales: { y: { beginAtZero: true }, x: { ticks: { autoSkip: true, maxTicksLimit: 10 } } },
+                            plugins: { legend: { display: false } } 
+                        }
+                    });
+                }
+            }, [activeTab, currentPayoff, debts]);
+
+            return (
+                <div className="min-h-screen pb-24">
+                    {/* Header */}
+                    <header className="bg-white border-b border-slate-200 sticky top-0 z-50 no-print">
+                        <div className="max-w-6xl mx-auto px-6 py-4 flex flex-col md:flex-row justify-between items-center gap-4">
+                            <div className="flex items-center gap-3">
+                                <div className="p-2.5 bg-indigo-600 text-white rounded-2xl shadow-lg shadow-indigo-100">
+                                    <Icon name="trending-down" size={24} />
+                                </div>
+                                <div>
+                                    <h1 className="text-2xl font-black tracking-tighter text-slate-900 italic uppercase">DebtMaster <span className="text-indigo-600 text-xl font-black">PRO</span></h1>
+                                    <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest leading-none mt-1 italic">Commercial Grade AI Intelligence</p>
+                                </div>
+                            </div>
+                            <div className="flex items-center gap-4">
+                                <div className="hidden md:block text-right">
+                                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Account Status</p>
+                                    <p className="text-xs font-bold text-slate-600">{isPremium ? '💎 Premium Mode' : '🆓 Basic Mode'}</p>
+                                </div>
+                                <button onClick={() => setIsPremium(!isPremium)} className="px-4 py-2 bg-slate-900 text-white text-[10px] font-black uppercase rounded-xl hover:bg-indigo-600 transition-colors">
+                                    {isPremium ? 'Switch to Basic' : 'Activate Premium'}
+                                </button>
+                            </div>
+                        </div>
+                    </header>
+
+                    {/* Navigation */}
+                    <nav className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-white/90 backdrop-blur-xl px-8 py-4 rounded-[2.5rem] shadow-2xl border border-slate-200 z-50 flex items-center gap-10 no-print">
+                        <button onClick={() => setActiveTab('dashboard')} className={`flex flex-col items-center gap-1.5 ${activeTab === 'dashboard' ? 'text-indigo-600 scale-110' : 'text-slate-400 hover:text-slate-600'} transition-all`}>
+                            <Icon name="layout-dashboard" size={20} />
+                            <span className="text-[9px] font-black uppercase tracking-widest">Snapshot</span>
+                        </button>
+                        <button onClick={() => setActiveTab('debts')} className={`flex flex-col items-center gap-1.5 ${activeTab === 'debts' ? 'text-indigo-600 scale-110' : 'text-slate-400 hover:text-slate-600'} transition-all`}>
+                            <Icon name="wallet" size={20} />
+                            <span className="text-[9px] font-black uppercase tracking-widest">Manage</span>
+                        </button>
+                        <button onClick={() => setActiveTab('strategy')} className={`flex flex-col items-center gap-1.5 ${activeTab === 'strategy' ? 'text-indigo-600 scale-110' : 'text-slate-400 hover:text-slate-600'} transition-all`}>
+                            <Icon name="zap" size={20} />
+                            <span className="text-[9px] font-black uppercase tracking-widest">Strategy</span>
+                        </button>
+                        {isPremium && (
+                            <button onClick={() => setActiveTab('sim')} className={`flex flex-col items-center gap-1.5 ${activeTab === 'sim' ? 'text-indigo-600 scale-110' : 'text-slate-400 hover:text-slate-600'} transition-all`}>
+                                <Icon name="bar-chart-3" size={20} />
+                                <span className="text-[9px] font-black uppercase tracking-widest">Simulation</span>
+                            </button>
+                        )}
+                    </nav>
+
+                    <div className="max-w-6xl mx-auto px-6 pt-10">
+                        {/* Tab Content */}
+                        {activeTab === 'dashboard' && (
+                            <div className="space-y-8 animate-in fade-in duration-500">
+                                {/* 5 Questions Snapshot */}
+                                <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+                                    <div className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm">
+                                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2">หนี้รวมทั้งหมด</p>
+                                        <h3 className="text-xl font-black text-slate-900">฿{totalDebt.toLocaleString()}</h3>
+                                    </div>
+                                    <div className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm">
+                                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2 text-rose-400">ดอกเบี้ย/เดือน</p>
+                                        <h3 className="text-xl font-black text-rose-500">฿{monthlyInterestFlow.toLocaleString(undefined, {maximumFractionDigits: 0})}</h3>
+                                    </div>
+                                    <div className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm">
+                                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2">เงินเหลือปลดหนี้</p>
+                                        <h3 className={`text-xl font-black ${cashFlowRemaining > 0 ? 'text-indigo-600' : 'text-rose-400'}`}>฿{cashFlowRemaining.toLocaleString()}</h3>
+                                    </div>
+                                    <div className={`p-6 rounded-[2rem] border border-slate-100 shadow-sm ${risk.color} bg-opacity-10`}>
+                                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2">ระดับความเสี่ยง</p>
+                                        <h3 className={`text-xl font-black ${risk.text}`}>{risk.label}</h3>
+                                    </div>
+                                    <div className="bg-indigo-600 p-6 rounded-[2rem] shadow-lg text-white">
+                                        <p className="text-[9px] font-black opacity-70 uppercase tracking-widest mb-2">อีกกี่เดือนหลุดหนี้</p>
+                                        <h3 className="text-xl font-black">{currentPayoff.months} <span className="text-xs">เดือน</span></h3>
+                                    </div>
+                                </div>
+
+                                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                                    {/* Risk Meter & AI Coach */}
+                                    <div className="lg:col-span-1 space-y-8">
+                                        <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm">
+                                            <h4 className="text-xs font-black text-slate-800 uppercase tracking-widest mb-6">Financial Risk Meter</h4>
+                                            <div className="relative h-4 w-full risk-gradient rounded-full mb-4 overflow-hidden">
+                                                <div className="absolute top-0 h-full w-1 bg-white shadow-xl transition-all duration-1000" style={{ left: `${Math.min(100, Number(dtiRatio) || 0)}%` }}></div>
+                                            </div>
+                                            <div className="flex justify-between text-[8px] font-black text-slate-300 uppercase tracking-widest mb-6">
+                                                <span>ต่ำ</span>
+                                                <span>กลาง</span>
+                                                <span>สูง</span>
+                                            </div>
+                                            <p className="text-xs font-bold text-slate-600 text-center italic">"{risk.desc}"</p>
+                                        </div>
+
+                                        <div className="bg-indigo-900 p-8 rounded-[2.5rem] text-white shadow-2xl relative overflow-hidden">
+                                            <div className="absolute top-0 right-0 p-4 opacity-10"><Icon name="message-square" size={80} /></div>
+                                            <h4 className="text-[10px] font-black text-indigo-300 uppercase tracking-widest mb-4 flex items-center gap-2">
+                                                <div className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-subtle"></div> AI DEBT COACH
+                                            </h4>
+                                            <p className="text-sm font-medium leading-relaxed italic">
+                                                {cashFlowRemaining < 0 
+                                                  ? "ตอนนี้รายจ่ายรวมหนี้สูงกว่ารายได้ แนะนำให้ใช้ Survival Mode และลองเจรจาขอยืดหนี้เพื่อลดค่างวดขั้นต่ำลงก่อนครับ" 
+                                                  : `คุณมีเงินเหลือ ฿${cashFlowRemaining.toLocaleString()} แนะนำให้นำไปโปะหนี้ดอกเบี้ยสูงโดยใช้แผน Avalanche จะช่วยประหยัดเงินได้ถึง ฿${interestSaved.toLocaleString()} ครับ`}
+                                            </p>
+                                        </div>
+                                    </div>
+
+                                    {/* Monthly Cashflow Reality Check */}
+                                    <div className="lg:col-span-2 bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm">
+                                        <div className="flex justify-between items-center mb-8">
+                                            <h4 className="text-xs font-black text-slate-800 uppercase tracking-widest">Monthly Cashflow Reality Check</h4>
+                                            <button onClick={() => setActiveTab('debts')} className="text-[9px] font-black text-indigo-600 uppercase border-b-2 border-indigo-100 hover:border-indigo-600 transition-all">ปรับแต่งตัวเลข</button>
+                                        </div>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
+                                            <div className="space-y-6">
+                                                <div className="flex justify-between border-b border-slate-50 pb-4">
+                                                    <span className="text-sm font-bold text-slate-500">รายได้สุทธิ</span>
+                                                    <span className="text-sm font-black tracking-tight">฿{numIncome.toLocaleString()}</span>
+                                                </div>
+                                                <div className="flex justify-between border-b border-slate-50 pb-4">
+                                                    <span className="text-sm font-bold text-slate-500">ค่าใช้จ่ายจำเป็น</span>
+                                                    <span className="text-sm font-black tracking-tight text-rose-500">- ฿{numEssential.toLocaleString()}</span>
+                                                </div>
+                                                <div className="flex justify-between border-b border-slate-50 pb-4">
+                                                    <span className="text-sm font-bold text-slate-500">จ่ายขั้นต่ำหนี้รวม</span>
+                                                    <span className="text-sm font-black tracking-tight text-rose-500">- ฿{totalMinPayment.toLocaleString()}</span>
+                                                </div>
+                                                <div className="flex justify-between pt-4">
+                                                    <span className="text-sm font-black text-indigo-900 uppercase italic">เงินที่ปลดหนี้ได้จริง</span>
+                                                    <span className={`text-xl font-black ${cashFlowRemaining > 0 ? 'text-indigo-600' : 'text-rose-500'}`}>฿{cashFlowRemaining.toLocaleString()}</span>
+                                                </div>
+                                            </div>
+                                            <div className="bg-slate-50 rounded-[2rem] p-8 flex flex-col justify-center items-center text-center">
+                                                <Icon name="smile" className="text-indigo-200 mb-4" size={40} />
+                                                <p className="text-xs font-bold text-slate-400 leading-relaxed italic">"แผนที่ดีที่สุดคือแผนที่เมตตาต่อใจ และคุณสามารถทำได้จริงอย่างต่อเนื่อง"</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {activeTab === 'debts' && (
+                            <div className="space-y-8 animate-in slide-in-from-right duration-500">
+                                <div className="bg-white p-10 rounded-[3rem] shadow-xl border border-slate-100">
+                                    <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-10">
+                                        <div>
+                                            <h2 className="text-2xl font-black text-slate-800 uppercase italic tracking-tighter">Income & Expense Check</h2>
+                                            <p className="text-xs font-bold text-slate-400">ระบุรายได้และรายจ่ายหลักเพื่อหาทางออก</p>
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-4 w-full md:w-auto">
+                                            <div className="bg-slate-50 p-4 rounded-2xl">
+                                                <p className="text-[8px] font-black text-slate-400 uppercase mb-1 tracking-widest">รายได้สุทธิ</p>
+                                                <input 
+                                                    type="number" 
+                                                    value={income} 
+                                                    onChange={e => setIncome(e.target.value)} 
+                                                    className="w-full bg-transparent font-black text-sm outline-none focus:text-indigo-600 transition-colors" 
+                                                />
+                                            </div>
+                                            <div className="bg-slate-50 p-4 rounded-2xl">
+                                                <p className="text-[8px] font-black text-slate-400 uppercase mb-1 tracking-widest">รายจ่ายจำเป็น</p>
+                                                <input 
+                                                    type="number" 
+                                                    value={essentialExpenses} 
+                                                    onChange={e => setEssentialExpenses(e.target.value)} 
+                                                    className="w-full bg-transparent font-black text-sm outline-none focus:text-rose-500 transition-colors" 
+                                                />
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div className="border-t border-slate-100 pt-10">
+                                        <div className="flex justify-between items-center mb-8">
+                                            <h3 className="text-xl font-black text-slate-800 uppercase italic tracking-tighter">Your Debt Ledger</h3>
+                                            <button 
+                                                onClick={() => setDebts([...debts, { id: Date.now(), name: 'รายการหนี้', balance: "", interestRate: "", minPayment: "" }])}
+                                                className="px-6 py-2.5 bg-indigo-600 text-white text-[10px] font-black uppercase rounded-xl hover:bg-slate-900 transition-all flex items-center gap-2 shadow-lg shadow-indigo-100"
+                                            >
+                                                <Icon name="plus" size={12} /> เพิ่มรายการ
+                                            </button>
+                                        </div>
+
+                                        <div className="space-y-4">
+                                            {debts.map((d, i) => (
+                                                <div key={d.id} className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end bg-slate-50/50 p-6 rounded-3xl border border-slate-100 hover:bg-white hover:shadow-lg transition-all group">
+                                                    <div className="md:col-span-3 space-y-1">
+                                                        <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest">ชื่อหนี้</label>
+                                                        <input value={d.name} onChange={e => {const nd = [...debts]; nd[i].name = e.target.value; setDebts(nd);}} className="w-full bg-transparent font-bold text-sm outline-none focus:text-indigo-600" />
+                                                    </div>
+                                                    <div className="md:col-span-3 space-y-1">
+                                                        <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest">ยอดคงเหลือ (฿)</label>
+                                                        <input type="number" value={d.balance} onChange={e => {const nd = [...debts]; nd[i].balance = e.target.value; setDebts(nd);}} className="w-full bg-transparent font-black text-sm outline-none" />
+                                                    </div>
+                                                    <div className="md:col-span-2 space-y-1">
+                                                        <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest">ดอกเบี้ย (%ต่อปี)</label>
+                                                        <input type="number" value={d.interestRate} onChange={e => {const nd = [...debts]; nd[i].interestRate = e.target.value; setDebts(nd);}} className="w-full bg-transparent font-black text-sm outline-none text-rose-500" />
+                                                    </div>
+                                                    <div className="md:col-span-3 space-y-1">
+                                                        <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest">ขั้นต่ำ (฿)</label>
+                                                        <input type="number" value={d.minPayment} onChange={e => {const nd = [...debts]; nd[i].minPayment = e.target.value; setDebts(nd);}} className="w-full bg-transparent font-black text-sm outline-none" />
+                                                    </div>
+                                                    <div className="md:col-span-1 text-right">
+                                                        <button onClick={() => setDebts(debts.filter(x => x.id !== d.id))} className="p-2 text-slate-200 hover:text-rose-500 transition-colors opacity-0 group-hover:opacity-100">
+                                                            <Icon name="trash-2" size={18} />
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {activeTab === 'strategy' && (
+                            <div className="space-y-8 animate-in zoom-in-95 duration-500">
+                                <div className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm">
+                                    <h2 className="text-2xl font-black text-slate-800 uppercase italic mb-2 tracking-tighter">Debt Strategy Engine</h2>
+                                    <p className="text-xs font-bold text-slate-400 mb-10 italic">เลือกแผนที่เหมาะกับ "ใจ" และ "เงิน" ในตอนนี้</p>
+
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
+                                        <button onClick={() => setStrategy('avalanche')} className={`p-8 rounded-[2.5rem] border-2 text-left transition-all ${strategy === 'avalanche' ? 'border-indigo-600 bg-indigo-50 shadow-xl shadow-indigo-100' : 'border-slate-50 hover:border-indigo-200'}`}>
+                                            <div className="flex items-center gap-3 mb-4">
+                                                <div className={`p-2 rounded-xl ${strategy === 'avalanche' ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-400'}`}>
+                                                    <Icon name="zap" size={20} />
+                                                </div>
+                                                <h4 className="font-black text-slate-900 uppercase text-xs">Avalanche</h4>
+                                            </div>
+                                            <p className="text-[10px] font-bold text-slate-500 leading-relaxed italic">ปิดหนี้ดอกแพงที่สุดก่อนเพื่อประหยัดเงินระยะยาว</p>
+                                        </button>
+                                        <button onClick={() => setStrategy('snowball')} className={`p-8 rounded-[2.5rem] border-2 text-left transition-all ${strategy === 'snowball' ? 'border-indigo-600 bg-indigo-50 shadow-xl shadow-indigo-100' : 'border-slate-50 hover:border-indigo-200'}`}>
+                                            <div className="flex items-center gap-3 mb-4">
+                                                <div className={`p-2 rounded-xl ${strategy === 'snowball' ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-400'}`}>
+                                                    <Icon name="trending-down" size={20} />
+                                                </div>
+                                                <h4 className="font-black text-slate-900 uppercase text-xs">Snowball</h4>
+                                            </div>
+                                            <p className="text-[10px] font-bold text-slate-500 leading-relaxed italic">ปิดหนี้ก้อนเล็กที่สุดก่อนเพื่อสร้างกำลังใจและชัยชนะแรก</p>
+                                        </button>
+                                        <button onClick={() => setStrategy('survival')} className={`p-8 rounded-[2.5rem] border-2 text-left transition-all ${strategy === 'survival' ? 'border-rose-600 bg-rose-50 shadow-xl shadow-rose-100' : 'border-slate-50 hover:border-rose-200'}`}>
+                                            <div className="flex items-center gap-3 mb-4">
+                                                <div className={`p-2 rounded-xl ${strategy === 'survival' ? 'bg-rose-600 text-white' : 'bg-slate-100 text-slate-400'}`}>
+                                                    <Icon name="shield-alert" size={20} />
+                                                </div>
+                                                <h4 className="font-black text-slate-900 uppercase text-xs">Survival</h4>
+                                            </div>
+                                            <p className="text-[10px] font-bold text-slate-500 leading-relaxed italic">เน้นรักษาเครดิตและกระแสเงินสดในยามจำเป็น</p>
+                                        </button>
+                                    </div>
+
+                                    <div className="bg-indigo-950 p-10 rounded-[3rem] text-white flex flex-col md:flex-row gap-10 items-center">
+                                        <div className="flex-1 space-y-6">
+                                            <p className="text-[9px] font-black text-indigo-400 uppercase tracking-[0.4em]">Payoff Roadmap</p>
+                                            <h3 className="text-3xl font-black italic uppercase">หลุดพ้นหนี้ในอีก {currentPayoff.months} เดือน</h3>
+                                            <div className="grid grid-cols-2 gap-6">
+                                                <div className="bg-white/5 p-4 rounded-2xl border border-white/10">
+                                                    <p className="text-[8px] font-bold opacity-60 uppercase mb-1">ดอกเบี้ยรวมสะสม</p>
+                                                    <p className="text-xl font-black">฿{currentPayoff.totalInterest.toLocaleString(undefined, {maximumFractionDigits: 0})}</p>
+                                                </div>
+                                                <div className="bg-emerald-500/10 p-4 rounded-2xl border border-emerald-500/20">
+                                                    <p className="text-[8px] font-bold text-emerald-400 uppercase mb-1">ประหยัดดอกเบี้ยไปได้</p>
+                                                    <p className="text-xl font-black text-emerald-400">฿{interestSaved.toLocaleString(undefined, {maximumFractionDigits: 0})}</p>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div className="w-full md:w-1/3 bg-white/5 rounded-[2.5rem] p-6 h-48 border border-white/5 shadow-inner">
+                                            <canvas id="timelineChart"></canvas>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {activeTab === 'sim' && isPremium && (
+                            <div className="space-y-8 animate-in slide-in-from-bottom duration-500">
+                                <div className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm relative overflow-hidden">
+                                    <div className="absolute top-0 right-0 p-6 opacity-5"><Icon name="cpu" size={150} /></div>
+                                    <div className="relative z-10">
+                                        <h2 className="text-2xl font-black text-slate-800 uppercase italic mb-8 tracking-tighter">Premium What-if Simulator</h2>
+                                        
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
+                                            <div className="space-y-10">
+                                                <div className="space-y-4">
+                                                    <div className="flex justify-between items-center">
+                                                        <label className="text-xs font-black text-slate-400 uppercase tracking-widest">เงินโปะเพิ่มต่อเดือน (฿)</label>
+                                                        <span className="text-sm font-black text-indigo-600 tracking-tight">฿{extraPayment.toLocaleString()}</span>
+                                                    </div>
+                                                    <input type="range" min="0" max={numIncome || 50000} step="500" value={extraPayment} onChange={e => setExtraPayment(Number(e.target.value))} className="w-full accent-indigo-600" />
+                                                </div>
+
+                                                <div className="bg-slate-900 p-8 rounded-[2rem] text-white">
+                                                    <h4 className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-6">Impact Analysis</h4>
+                                                    <div className="space-y-4">
+                                                        <div className="flex justify-between items-center text-sm">
+                                                            <span className="opacity-60">ปลดหนี้ไวขึ้น</span>
+                                                            <span className="font-black text-emerald-400">{Math.max(0, noExtraPayoff.months - currentPayoff.months)} เดือน</span>
+                                                        </div>
+                                                        <div className="flex justify-between items-center text-sm">
+                                                            <span className="opacity-60">ประหยัดดอกเบี้ยบาท</span>
+                                                            <span className="font-black text-emerald-400">฿{interestSaved.toLocaleString(undefined, {maximumFractionDigits: 0})}</span>
+                                                        </div>
+                                                        <div className="pt-4 border-t border-white/10 flex justify-between items-center font-black">
+                                                            <span className="text-xs italic">อิสรภาพของคุณจะเริ่มต้นใน:</span>
+                                                            <span className="text-xs text-indigo-300">
+                                                                {new Date(new Date().setMonth(new Date().getMonth() + currentPayoff.months)).toLocaleDateString('th-TH', { month: 'long', year: 'numeric' })}
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <div className="flex flex-col justify-center items-center gap-6 bg-slate-50 rounded-[2.5rem] p-8 border border-slate-100">
+                                                <div className="w-16 h-16 bg-white rounded-full shadow-lg flex items-center justify-center">
+                                                    <Icon name="milestone" className="text-indigo-500" />
+                                                </div>
+                                                <h5 className="text-sm font-black text-slate-800 uppercase italic">Milestone Check</h5>
+                                                <p className="text-[10px] font-bold text-slate-400 max-w-[200px] leading-relaxed text-center">ด้วยแผนนี้ คุณจะสามารถปิดหนี้ก้อนแรกได้ในอีก <b>{Math.ceil(currentPayoff.months / 4)} เดือน</b> รักษาวินัยไว้เพื่อชัยชนะนะครับ!</p>
+                                                <div className="w-full bg-slate-200 h-1 rounded-full mt-4">
+                                                    <div className="bg-indigo-500 h-full rounded-full transition-all duration-1000" style={{ width: '25%' }}></div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
