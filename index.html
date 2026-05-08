@@ -22,6 +22,11 @@
         }
         .animate-subtle { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
         @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .8; } }
+        input[type="number"]::-webkit-inner-spin-button, 
+        input[type="number"]::-webkit-outer-spin-button { 
+            -webkit-appearance: none; 
+            margin: 0; 
+        }
     </style>
 </head>
 <body>
@@ -30,17 +35,16 @@
     <script type="text/babel">
         const { useState, useEffect, useMemo, useRef } = React;
 
-        // --- Mocking Lucide Icons for CDN Environment ---
+        // --- Optimized Icon Component ---
         const Icon = ({ name, size = 20, className = "" }) => {
-            useEffect(() => { lucide.createIcons(); }, []);
-            return <i data-lucide={name} className={className} style={{ width: size, height: size }}></i>;
+            return <i data-lucide={name} className={className} style={{ width: size, height: size, display: 'inline-block' }}></i>;
         };
 
         const App = () => {
             // --- State ---
             const [debts, setDebts] = useState([]);
-            const [income, setIncome] = useState(0);
-            const [essentialExpenses, setEssentialExpenses] = useState(0);
+            const [income, setIncome] = useState("");
+            const [essentialExpenses, setEssentialExpenses] = useState("");
             const [extraPayment, setExtraPayment] = useState(0);
             const [activeTab, setActiveTab] = useState('dashboard');
             const [strategy, setStrategy] = useState('avalanche'); // avalanche, snowball, survival
@@ -49,6 +53,13 @@
             const chartRef = useRef(null);
             const pieRef = useRef(null);
 
+            // --- Icon Initialization (Fixes Focus Issue) ---
+            useEffect(() => {
+                if (window.lucide) {
+                    window.lucide.createIcons();
+                }
+            }, [activeTab, debts.length, isPremium]);
+
             // --- Persistence ---
             useEffect(() => {
                 const savedDebts = localStorage.getItem('debt_pro_data');
@@ -56,8 +67,8 @@
                 if (savedDebts) setDebts(JSON.parse(savedDebts));
                 if (savedFinances) {
                     const { inc, exp, extra } = JSON.parse(savedFinances);
-                    setIncome(inc || 0);
-                    setEssentialExpenses(exp || 0);
+                    setIncome(inc || "");
+                    setEssentialExpenses(exp || "");
                     setExtraPayment(extra || 0);
                 }
             }, []);
@@ -68,11 +79,13 @@
             }, [debts, income, essentialExpenses, extraPayment]);
 
             // --- Core Calculations ---
-            const totalDebt = useMemo(() => debts.reduce((sum, d) => sum + Number(d.balance), 0), [debts]);
-            const totalMinPayment = useMemo(() => debts.reduce((sum, d) => sum + Number(d.minPayment), 0), [debts]);
-            const monthlyInterestFlow = useMemo(() => debts.reduce((sum, d) => sum + (Number(d.balance) * (Number(d.interestRate) / 100) / 12), 0), [debts]);
-            const cashFlowRemaining = income - essentialExpenses - totalMinPayment;
-            const dtiRatio = income > 0 ? ((totalMinPayment / income) * 100).toFixed(1) : 0;
+            const numIncome = Number(income) || 0;
+            const numEssential = Number(essentialExpenses) || 0;
+            const totalDebt = useMemo(() => debts.reduce((sum, d) => sum + (Number(d.balance) || 0), 0), [debts]);
+            const totalMinPayment = useMemo(() => debts.reduce((sum, d) => sum + (Number(d.minPayment) || 0), 0), [debts]);
+            const monthlyInterestFlow = useMemo(() => debts.reduce((sum, d) => sum + ((Number(d.balance) || 0) * ((Number(d.interestRate) || 0) / 100) / 12), 0), [debts]);
+            const cashFlowRemaining = numIncome - numEssential - totalMinPayment;
+            const dtiRatio = numIncome > 0 ? ((totalMinPayment / numIncome) * 100).toFixed(1) : 0;
 
             const getRiskLevel = () => {
                 if (dtiRatio <= 30) return { label: 'ปลอดภัย', color: 'bg-emerald-500', text: 'text-emerald-600', desc: 'ภาระหนี้ของคุณอยู่ในเกณฑ์ดีเยี่ยม' };
@@ -84,13 +97,12 @@
             // --- Payoff Simulation Engine ---
             const calculatePayoff = (strategyType, monthlyExtra) => {
                 if (debts.length === 0) return { months: 0, totalInterest: 0, timeline: [], totalPaid: 0 };
-                let currentDebts = debts.map(d => ({ ...d, currentBalance: Number(d.balance) }));
+                let currentDebts = debts.map(d => ({ ...d, currentBalance: Number(d.balance) || 0 }));
                 let months = 0, totalInterest = 0, totalPaid = 0, timeline = [];
                 const MAX_MONTHS = 480; // 40 years
 
                 if (strategyType === 'snowball') currentDebts.sort((a, b) => a.currentBalance - b.currentBalance);
-                else if (strategyType === 'avalanche') currentDebts.sort((a, b) => b.interestRate - a.interestRate);
-                // survival mode uses original order or doesn't prioritize extra much
+                else if (strategyType === 'avalanche') currentDebts.sort((a, b) => (Number(b.interestRate) || 0) - (Number(a.interestRate) || 0));
 
                 while (currentDebts.some(d => d.currentBalance > 0) && months < MAX_MONTHS) {
                     months++;
@@ -100,10 +112,10 @@
                     // 1. Pay Interest and Minimums
                     currentDebts.forEach(d => {
                         if (d.currentBalance > 0) {
-                            const mInterest = (d.currentBalance * (d.interestRate / 100)) / 12;
+                            const mInterest = (d.currentBalance * ((Number(d.interestRate) || 0) / 100)) / 12;
                             totalInterest += mInterest;
                             d.currentBalance += mInterest;
-                            const payment = Math.min(d.currentBalance, Number(d.minPayment));
+                            const payment = Math.min(d.currentBalance, Number(d.minPayment) || 0);
                             d.currentBalance -= payment;
                             totalPaid += payment;
                         }
@@ -240,7 +252,7 @@
                                         <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm">
                                             <h4 className="text-xs font-black text-slate-800 uppercase tracking-widest mb-6">Financial Risk Meter</h4>
                                             <div className="relative h-4 w-full risk-gradient rounded-full mb-4 overflow-hidden">
-                                                <div className="absolute top-0 h-full w-1 bg-white shadow-xl transition-all duration-1000" style={{ left: `${Math.min(100, dtiRatio)}%` }}></div>
+                                                <div className="absolute top-0 h-full w-1 bg-white shadow-xl transition-all duration-1000" style={{ left: `${Math.min(100, Number(dtiRatio) || 0)}%` }}></div>
                                             </div>
                                             <div className="flex justify-between text-[8px] font-black text-slate-300 uppercase tracking-widest mb-6">
                                                 <span>ต่ำ</span>
@@ -273,11 +285,11 @@
                                             <div className="space-y-6">
                                                 <div className="flex justify-between border-b border-slate-50 pb-4">
                                                     <span className="text-sm font-bold text-slate-500">รายได้สุทธิ</span>
-                                                    <span className="text-sm font-black tracking-tight">฿{income.toLocaleString()}</span>
+                                                    <span className="text-sm font-black tracking-tight">฿{numIncome.toLocaleString()}</span>
                                                 </div>
                                                 <div className="flex justify-between border-b border-slate-50 pb-4">
                                                     <span className="text-sm font-bold text-slate-500">ค่าใช้จ่ายจำเป็น</span>
-                                                    <span className="text-sm font-black tracking-tight text-rose-500">- ฿{essentialExpenses.toLocaleString()}</span>
+                                                    <span className="text-sm font-black tracking-tight text-rose-500">- ฿{numEssential.toLocaleString()}</span>
                                                 </div>
                                                 <div className="flex justify-between border-b border-slate-50 pb-4">
                                                     <span className="text-sm font-bold text-slate-500">จ่ายขั้นต่ำหนี้รวม</span>
@@ -309,11 +321,21 @@
                                         <div className="grid grid-cols-2 gap-4 w-full md:w-auto">
                                             <div className="bg-slate-50 p-4 rounded-2xl">
                                                 <p className="text-[8px] font-black text-slate-400 uppercase mb-1 tracking-widest">รายได้สุทธิ</p>
-                                                <input type="number" value={income} onChange={e => setIncome(Number(e.target.value))} className="w-full bg-transparent font-black text-sm outline-none focus:text-indigo-600 transition-colors" />
+                                                <input 
+                                                    type="number" 
+                                                    value={income} 
+                                                    onChange={e => setIncome(e.target.value)} 
+                                                    className="w-full bg-transparent font-black text-sm outline-none focus:text-indigo-600 transition-colors" 
+                                                />
                                             </div>
                                             <div className="bg-slate-50 p-4 rounded-2xl">
                                                 <p className="text-[8px] font-black text-slate-400 uppercase mb-1 tracking-widest">จ่ายจำเป็น (ไม่รวมหนี้)</p>
-                                                <input type="number" value={essentialExpenses} onChange={e => setEssentialExpenses(Number(e.target.value))} className="w-full bg-transparent font-black text-sm outline-none focus:text-indigo-600 transition-colors" />
+                                                <input 
+                                                    type="number" 
+                                                    value={essentialExpenses} 
+                                                    onChange={e => setEssentialExpenses(e.target.value)} 
+                                                    className="w-full bg-transparent font-black text-sm outline-none focus:text-indigo-600 transition-colors" 
+                                                />
                                             </div>
                                         </div>
                                     </div>
@@ -322,7 +344,7 @@
                                         <div className="flex justify-between items-center mb-8">
                                             <h3 className="text-xl font-black text-slate-800 uppercase italic tracking-tighter">หนี้ทั้งหมดของคุณ</h3>
                                             <button 
-                                                onClick={() => setDebts([...debts, { id: Date.now(), name: 'หนี้ใหม่', balance: 0, interestRate: 15, minPayment: 0 }])}
+                                                onClick={() => setDebts([...debts, { id: Date.now(), name: 'หนี้ใหม่', balance: "", interestRate: "", minPayment: "" }])}
                                                 className="px-6 py-2.5 bg-indigo-600 text-white text-[10px] font-black uppercase rounded-xl hover:bg-slate-900 transition-all flex items-center gap-2 shadow-lg shadow-indigo-100"
                                             >
                                                 <Icon name="plus" size={12} /> เพิ่มรายการหนี้
@@ -434,7 +456,7 @@
                                                         <label className="text-xs font-black text-slate-400 uppercase tracking-widest">โปะเพิ่มรายเดือน (฿)</label>
                                                         <span className="text-sm font-black text-indigo-600 tracking-tight">฿{extraPayment.toLocaleString()}</span>
                                                     </div>
-                                                    <input type="range" min="0" max={income} step="500" value={extraPayment} onChange={e => setExtraPayment(Number(e.target.value))} className="w-full accent-indigo-600" />
+                                                    <input type="range" min="0" max={numIncome || 50000} step="500" value={extraPayment} onChange={e => setExtraPayment(Number(e.target.value))} className="w-full accent-indigo-600" />
                                                 </div>
 
                                                 <div className="bg-slate-900 p-8 rounded-[2rem] text-white">
@@ -465,7 +487,7 @@
                                                 <h5 className="text-sm font-black text-slate-800 uppercase italic">Milestone: ปิดหนี้ก้อนแรก</h5>
                                                 <p className="text-[10px] font-bold text-slate-400 max-w-[200px] leading-relaxed">หากทำตามแผนนี้ คุณจะสามารถปิดหนี้ก้อนแรกได้ในอีก <b>{Math.ceil(currentPayoff.months / 3)} เดือน</b> สู้ๆ นะครับ!</p>
                                                 <div className="w-full bg-slate-200 h-1 rounded-full mt-4">
-                                                    <div className="bg-indigo-500 h-full rounded-full transition-all duration-1000" style={{ width: '33%' }}></div>
+                                                    <div className="bg-indigo-50 h-full rounded-full transition-all duration-1000" style={{ width: '33%' }}></div>
                                                 </div>
                                             </div>
                                         </div>
