@@ -1,206 +1,69 @@
 <!DOCTYPE html>
 <html lang="th">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>DebtMaster AI Pro</title>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>DebtMaster AI Pro</title>
 
-  <!-- Dependencies -->
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script src="https://unpkg.com/lucide@latest"></script>
+<!-- Dependencies -->
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://unpkg.com/lucide@latest"></script>
 
-  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@300;400;600;700;900&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@300;400;600;700;900&display=swap" rel="stylesheet">
 
-  <style>
-    body { font-family: 'Noto Sans Thai', sans-serif; background:#f8fafc }
-    canvas { max-width:100%!important }
-    @media print {.no-print{display:none}}
-  </style>
+<style>
+body { font-family: 'Noto Sans Thai', sans-serif; background:#f8fafc; }
+canvas { max-width:100%!important; }
+@media print {.no-print{display:none}}
+</style>
 </head>
+
 <body>
 <div id="root"></div>
 
 <script type="text/babel">
-const {useState,useEffect,useMemo,useRef}=React;
+const { useState, useEffect, useMemo, useRef } = React;
 
-const Icon=({name,size=20,className=""})=>(
-  <i data-lucide={name} className={className} style={{width:size,height:size,display:'inline-block'}}></i>
+const Icon = ({ name, size = 20, className = "" }) => (
+  <i data-lucide={name} className={className}
+     style={{ width: size, height: size, display: "inline-block" }}></i>
 );
 
-const App=()=>{
-  const [debts,setDebts]=useState([]);
-  const [income,setIncome]=useState("");
-  const [essential,setEssential]=useState("");
-  const [extra,setExtra]=useState(0);
-  const [strategy,setStrategy]=useState("avalanche");
-  const [tab,setTab]=useState("dashboard");
-  const [premium,setPremium]=useState(false);
+const App = () => {
+  /* ========= STATE ========= */
+  const [debts, setDebts] = useState([]);
+  const [income, setIncome] = useState("");
+  const [essential, setEssential] = useState("");
+  const [extraPayment, setExtraPayment] = useState(0);
+  const [strategy, setStrategy] = useState("avalanche");
+  const [tab, setTab] = useState("dashboard");
+  const [premium, setPremium] = useState(false);
 
-  const chartRef=useRef(null);
+  const chartRef = useRef(null);
 
-  /* ------------ persistence ------------ */
-  useEffect(()=>{
-    const d=localStorage.getItem("dm_debts");
-    const f=localStorage.getItem("dm_fin");
-    if(d) setDebts(JSON.parse(d));
-    if(f){
-      const j=JSON.parse(f);
-      setIncome(j.i||"");
-      setEssential(j.e||"");
-      setExtra(j.x||0);
+  /* ========= LOAD / SAVE ========= */
+  useEffect(() => {
+    const d = localStorage.getItem("dm_debts");
+    const f = localStorage.getItem("dm_fin");
+    if (d) setDebts(JSON.parse(d));
+    if (f) {
+      const j = JSON.parse(f);
+      setIncome(j.i || "");
+      setEssential(j.e || "");
+      setExtraPayment(j.x || 0);
     }
-  },[]);
+  }, []);
 
-  useEffect(()=>{
-    localStorage.setItem("dm_debts",JSON.stringify(debts));
-    localStorage.setItem("dm_fin",JSON.stringify({i:income,e:essential,x:extra}));
-    if(window.lucide) window.lucide.createIcons();
-  },[debts,income,essential,extra,tab,premium]);
+  useEffect(() => {
+    localStorage.setItem("dm_debts", JSON.stringify(debts));
+    localStorage.setItem("dm_fin", JSON.stringify({
+      i: income, e: essential, x: extraPayment
+    }));
+    if (window.lucide) window.lucide.createIcons();
+  }, [debts, income, essential, extraPayment, tab, premium]);
 
-  /* ------------ numbers ------------ */
-  const numIncome=+income||0;
-  const numEssential=+essential||0;
-
-  const totalDebt=useMemo(
-    ()=>debts.reduce((s,d)=>s+(+d.balance||0),0),
-    [debts]
-  );
-
-  const totalMin=useMemo(
-    ()=>debts.reduce((s,d)=>s+(+d.minPayment||0),0),
-    [debts]
-  );
-
-  const monthlyInterest=useMemo(
-    ()=>debts.reduce((s,d)=>s+((+d.balance||0)*((+d.interestRate||0)/100)/12),0),
-    [debts]
-  );
-
-  const cashLeft=numIncome-numEssential-totalMin;
-  const maxExtra=Math.max(0,cashLeft);
-
-  /* ------------ growing debt detection ------------ */
-  const hasGrowingDebt=debts.some(d=>{
-    const interest=(+d.balance||0)*((+d.interestRate||0)/100)/12;
-    return interest >= (+d.minPayment||0);
-  });
-
-  /* ------------ payoff engine ------------ */
-  const payoff=(mode,extraPay)=>{
-    if(!debts.length) return {months:0,totalInterest:0,timeline:[]};
-
-    let list=debts.map(d=>({...d,bal:+d.balance||0}));
-    let months=0,intSum=0;
-    const MAX=480;
-
-    if(mode==="avalanche")
-      list.sort((a,b)=>(+b.interestRate||0)-(+a.interestRate||0));
-    if(mode==="snowball")
-      list.sort((a,b)=>a.bal-b.bal);
-
-    while(list.some(d=>d.bal>0)&&months<MAX){
-      months++;
-      let extraAvail=mode==="survival"?0:+extraPay;
-
-      list.forEach(d=>{
-        if(d.bal<=0) return;
-        const i=d.bal*((+d.interestRate||0)/100)/12;
-        d.bal+=i; intSum+=i;
-
-        const pay=Math.min(d.bal,(+d.minPayment||0));
-        d.bal-=pay;
-      });
-
-      for(let d of list){
-        if(d.bal>0&&extraAvail>0){
-          const e=Math.min(d.bal,extraAvail);
-          d.bal-=e;
-          extraAvail-=e;
-        }
-      }
-      const sum=list.reduce((s,d)=>s+d.bal,0);
-      if(sum<=0) break;
-    }
-
-    return {months,totalInterest:intSum,timeline:list};
-  };
-
-  const base=useMemo(()=>payoff("survival",0),[debts]);
-  const cur=useMemo(()=>payoff(strategy,extra),[debts,strategy,extra]);
-  const saved=Math.max(0,base.totalInterest-cur.totalInterest);
-
-  /* ------------ chart ------------ */
-  useEffect(()=>{
-    if(tab!=="strategy")return;
-    const ctx=document.getElementById("chart")?.getContext("2d");
-    if(!ctx)return;
-    if(chartRef.current) chartRef.current.destroy();
-
-    chartRef.current=new Chart(ctx,{
-      type:"line",
-      data:{
-        labels:[...Array(cur.months)].map((_,i)=>`ด.${i+1}`),
-        datasets:[{
-          data:[...Array(cur.months)].map((_,i)=>Math.max(0,totalDebt*(1-i/cur.months))),
-          borderColor:"#4f46e5",
-          tension:.4,pointRadius:0
-        }]
-      },
-      options:{responsive:true,plugins:{legend:{display:false}}}
-    });
-  },[tab,cur.months,debts.length]);
-
-  return (
-    <div className="min-h-screen p-6">
-      <h1 className="text-2xl font-black mb-4">DebtMaster AI Pro</h1>
-
-      {hasGrowingDebt && (
-        <div className="bg-rose-50 text-rose-600 p-4 rounded-xl mb-4 text-sm">
-          ⚠️ มีหนี้ที่ค่างวดต่ำกว่าดอกเบี้ย → หนี้จะไม่ลด ควรรีไฟแนนซ์หรือเจรจากับเจ้าหนี้
-        </div>
-      )}
-
-      <div className="grid grid-cols-2 gap-4">
-        <input placeholder="รายได้" type="number" value={income}
-          onChange={e=>setIncome(e.target.value)} className="p-2 border rounded"/>
-        <input placeholder="รายจ่ายจำเป็น" type="number" value={essential}
-          onChange={e=>setEssential(e.target.value)} className="p-2 border rounded"/>
-      </div>
-
-      <div className="mt-4 text-sm">
-        เงินเหลือจริง: <b className={cashLeft>0?"text-indigo-600":"text-rose-600"}>
-          ฿{cashLeft.toLocaleString()}
-        </b>
-      </div>
-
-      {premium && (
-        <div className="mt-4">
-          <label className="text-xs font-bold">เงินโปะเพิ่ม (ไม่เกินเงินที่มี)</label>
-          <input type="range" min="0" max={maxExtra} step="500"
-            value={extra} onChange={e=>setExtra(+e.target.value)}
-            className="w-full"/>
-        </div>
-      )}
-
-      <div className="mt-6 bg-slate-900 text-white p-4 rounded-xl">
-        หลุดหนี้ใน <b>{cur.months}</b> เดือน<br/>
-        ประหยัดดอกเบี้ย <b className="text-emerald-400">฿{saved.toLocaleString()}</b>
-      </div>
-
-      <canvas id="chart" className="mt-6 h-40"></canvas>
-
-      <footer className="text-[10px] text-slate-400 mt-10 italic">
-        * การคำนวณเป็นการจำลอง ไม่ใช่คำแนะนำทางการเงิน
-      </footer>
-    </div>
-  );
-};
-
-ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
-</script>
-</body>
-</html>
+  /* ========= CALC ========= */
