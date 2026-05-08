@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DebtMaster AI - ปฏิวัติการปลดหนี้</title>
+    <!-- Dependencies -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@300;400;600;700;900&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Noto Sans Thai', sans-serif; background-color: #f1f5f9; }
+        canvas { max-width: 100% !important; }
+        .no-print { display: block; }
+        @media print { .no-print { display: none !important; } }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo, useRef } = React;
+
+        // --- Mocking Lucide Icons for CDN Environment ---
+        const Icon = ({ name, size = 20, className = "" }) => {
+            useEffect(() => { lucide.createIcons(); }, []);
+            return <i data-lucide={name} className={className} style={{ width: size, height: size }}></i>;
+        };
+
+        const App = () => {
+            const [debts, setDebts] = useState([]);
+            const [income, setIncome] = useState(0);
+            const [essentialExpenses, setEssentialExpenses] = useState(0);
+            const [extraPayment, setExtraPayment] = useState(0);
+            const [activeTab, setActiveTab] = useState('dashboard');
+            const [strategy, setStrategy] = useState('avalanche');
+            
+            const chartRef = useRef(null);
+            const pieRef = useRef(null);
+
+            // --- Persistence ---
+            useEffect(() => {
+                const savedDebts = localStorage.getItem('debt_master_data');
+                const savedFinances = localStorage.getItem('debt_master_finances');
+                if (savedDebts) setDebts(JSON.parse(savedDebts));
+                if (savedFinances) {
+                    const { inc, exp, extra } = JSON.parse(savedFinances);
+                    setIncome(inc || 0);
+                    setEssentialExpenses(exp || 0);
+                    setExtraPayment(extra || 0);
+                }
+            }, []);
+
+            useEffect(() => {
+                localStorage.setItem('debt_master_data', JSON.stringify(debts));
+                localStorage.setItem('debt_master_finances', JSON.stringify({ inc: income, exp: essentialExpenses, extra: extraPayment }));
+            }, [debts, income, essentialExpenses, extraPayment]);
+
+            // --- Calculations ---
+            const totalDebt = useMemo(() => debts.reduce((sum, d) => sum + Number(d.balance), 0), [debts]);
+            const totalMinPayment = useMemo(() => debts.reduce((sum, d) => sum + Number(d.minPayment), 0), [debts]);
+            const cashFlowRemaining = income - essentialExpenses - totalMinPayment;
+            const dtiRatio = income > 0 ? ((totalMinPayment / income) * 100).toFixed(1) : 0;
+
+            const calculatePayoff = (strategyType, monthlyExtra) => {
+                if (debts.length === 0) return { months: 0, totalInterest: 0, timeline: [] };
+                let currentDebts = debts.map(d => ({ ...d, currentBalance: Number(d.balance) }));
+                let months = 0, totalInterest = 0, timeline = [];
+                const MAX_MONTHS = 360;
+
+                if (strategyType === 'snowball') currentDebts.sort((a, b) => a.currentBalance - b.currentBalance);
+                else currentDebts.sort((a, b) => b.interestRate - a.interestRate);
+
+                while (currentDebts.some(d => d.currentBalance > 0) && months < MAX_MONTHS) {
+                    months++;
+                    let extraAvailable = Number(monthlyExtra);
+                    let monthlyTotalBalance = 0;
+
+                    currentDebts.forEach(d => {
+                        if (d.currentBalance > 0) {
+                            const mInterest = (d.currentBalance * (d.interestRate / 100)) / 12;
+                            totalInterest += mInterest;
+                            d.currentBalance += mInterest;
+                            const payment = Math.min(d.currentBalance, Number(d.minPayment));
+                            d.currentBalance -= payment;
+                        }
+                    });
+
+                    for (let d of currentDebts) {
+                        if (d.currentBalance > 0 && extraAvailable > 0) {
+                            const appliedExtra = Math.min(d.currentBalance, extraAvailable);
+                            d.currentBalance -= appliedExtra;
+                            extraAvailable -= appliedExtra;
+                        }
+                        monthlyTotalBalance += d.currentBalance;
+                    }
+                    timeline.push({ month: months, balance: Math.max(0, monthlyTotalBalance) });
+                    if (monthlyTotalBalance <= 0) break;
+                }
+                return { months, totalInterest, timeline };
+            };
+
+            const currentPayoff = useMemo(() => calculatePayoff(strategy, extraPayment), [debts, strategy, extraPayment]);
+
+            // --- Charts Rendering ---
+            useEffect(() => {
+                if (debts.length > 0) {
+                    // Line Chart
+                    const ctx = document.getElementById('timelineChart')?.getContext('2d');
+                    if (ctx) {
+                        if (chartRef.current) chartRef.current.destroy();
+                        chartRef.current = new Chart(ctx, {
+                            type: 'line',
+                            data: {
+                                labels: currentPayoff.timeline.map(t => `ด.${t.month}`),
+                                datasets: [{
+                                    label: 'ยอดหนี้คงเหลือ',
+                                    data: currentPayoff.timeline.map(t => t.balance),
+                                    borderColor: '#4f46e5',
+                                    fill: true,
+                                    backgroundColor: 'rgba(79, 70, 229, 0.1)',
+                                    tension: 0.4
+                                }]
+                            },
+                            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+                        });
+                    }
+                    // Pie Chart
+                    const ptx = document.getElementById('pieChart')?.getContext('2d');
+                    if (ptx) {
+                        if (pieRef.current) pieRef.current.destroy();
+                        pieRef.current = new Chart(ptx, {
+                            type: 'pie',
+                            data: {
+                                labels: debts.map(d => d.name),
+                                datasets: [{
+                                    data: debts.map(d => d.balance),
+                                    backgroundColor: ['#4f46e5', '#ec4899', '#f59e0b', '#10b981', '#6366f1']
+                                }]
+                            },
+                            options: { responsive: true, maintainAspectRatio: false }
+                        });
+                    }
+                }
+            }, [activeTab, currentPayoff, debts]);
+
+            const getHealth = () => {
+                if (dtiRatio < 30) return { label: 'ปลอดภัย', color: 'text-emerald-500', bg: 'bg-emerald-50' };
+                if (dtiRatio < 45) return { label: 'ระวัง', color: 'text-amber-500', bg: 'bg-amber-50' };
+                return { label: 'วิกฤต', color: 'text-rose-500', bg: 'bg-rose-50' };
+            };
+            const health = getHealth();
+
+            return (
+                <div className="min-h-screen pb-20">
+                    {/* Nav */}
+                    <nav className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-white/80 backdrop-blur-xl px-6 py-4 rounded-[2.5rem] shadow-2xl border border-slate-200 z-50 flex items-center gap-8 no-print">
+                        <button onClick={() => setActiveTab('dashboard')} className={`flex flex-col items-center gap-1 ${activeTab === 'dashboard' ? 'text-indigo-600' : 'text-slate-400'}`}>
+                            <Icon name="bar-chart-3" />
+                            <span className="text-[9px] font-black uppercase">สรุป</span>
+                        </button>
+                        <button onClick={() => setActiveTab('debts')} className={`flex flex-col items-center gap-1 ${activeTab === 'debts' ? 'text-indigo-600' : 'text-slate-400'}`}>
+                            <Icon name="wallet" />
+                            <span className="text-[9px] font-black uppercase">จัดการหนี้</span>
+                        </button>
+                        <button onClick={() => setActiveTab('strategy')} className={`flex flex-col items-center gap-1 ${activeTab === 'strategy' ? 'text-indigo-600' : 'text-slate-400'}`}>
+                            <Icon name="zap" />
+                            <span className="text-[9px] font-black uppercase">กลยุทธ์</span>
+                        </button>
+                    </nav>
+
+                    <div className="max-w-6xl mx-auto px-6 pt-10">
+                        <header className="flex justify-between items-center mb-10">
+                            <div className="flex items-center gap-4">
+                                <div className="p-3 bg-indigo-600 text-white rounded-2xl shadow-lg rotate-3">
+                                    <Icon name="trending-down" size={24} />
+                                </div>
+                                <div>
+                                    <h1 className="text-3xl font-black tracking-tighter text-slate-900 italic uppercase">DebtMaster <span className="text-indigo-600">AI</span></h1>
+                                    <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest">Local Privacy Guaranteed</p>
+                                </div>
+                            </div>
+                            <button onClick={() => window.print()} className="p-3 bg-white text-slate-400 rounded-xl no-print shadow-sm">
+                                <Icon name="save" />
+                            </button>
+                        </header>
+
+                        {activeTab === 'dashboard' && (
+                            <div className="space-y-6">
+                                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                                    <div className="bg-white p-6 rounded-[2rem] shadow-sm">
+                                        <p className="text-[10px] font-black text-slate-400 uppercase mb-1">หนี้ทั้งหมด</p>
+                                        <h3 className="text-2xl font-black">฿{totalDebt.toLocaleString()}</h3>
+                                    </div>
+                                    <div className="bg-white p-6 rounded-[2rem] shadow-sm">
+                                        <p className="text-[10px] font-black text-slate-400 uppercase mb-1">ขั้นต่ำรวม</p>
+                                        <h3 className="text-2xl font-black">฿{totalMinPayment.toLocaleString()}</h3>
+                                    </div>
+                                    <div className={`p-6 rounded-[2rem] shadow-sm ${health.bg}`}>
+                                        <p className="text-[10px] font-black text-slate-400 uppercase mb-1">DTI Ratio</p>
+                                        <h3 className={`text-2xl font-black ${health.color}`}>{dtiRatio}% ({health.label})</h3>
+                                    </div>
+                                    <div className="bg-indigo-600 p-6 rounded-[2rem] text-white">
+                                        <p className="text-[10px] font-black opacity-70 uppercase mb-1">เวลาที่เหลือ</p>
+                                        <h3 className="text-2xl font-black">{currentPayoff.months} เดือน</h3>
+                                    </div>
+                                </div>
+
+                                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                                    <div className="lg:col-span-1 bg-white p-8 rounded-[2.5rem] border">
+                                        <h4 className="text-sm font-black mb-6 uppercase flex items-center gap-2"><Icon name="pie-chart" className="text-indigo-600"/> สัดส่วนหนี้</h4>
+                                        <div className="h-64"><canvas id="pieChart"></canvas></div>
+                                    </div>
+                                    <div className="lg:col-span-2 bg-white p-8 rounded-[2.5rem] border">
+                                        <h4 className="text-sm font-black mb-6 uppercase">การเงินรายเดือน</h4>
+                                        <div className="grid grid-cols-2 gap-4 mb-6">
+                                            <div className="p-4 bg-slate-50 rounded-2xl">
+                                                <label className="text-[10px] font-black text-slate-400 uppercase">รายได้</label>
+                                                <input type="number" value={income} onChange={e => setIncome(Number(e.target.value))} className="w-full bg-transparent font-black text-xl outline-none" />
+                                            </div>
+                                            <div className="p-4 bg-slate-50 rounded-2xl">
+                                                <label className="text-[10px] font-black text-slate-400 uppercase">รายจ่ายจำเป็น</label>
+                                                <input type="number" value={essentialExpenses} onChange={e => setEssentialExpenses(Number(e.target.value))} className="w-full bg-transparent font-black text-xl outline-none" />
+                                            </div>
+                                        </div>
+                                        <div className="p-6 bg-indigo-50 rounded-[2rem] border border-indigo-100">
+                                            <p className="text-sm font-bold text-indigo-900">กระแสเงินสดคงเหลือ: ฿{cashFlowRemaining.toLocaleString()}</p>
+                                            <p className="text-[10px] text-indigo-400 mt-2">เงินส่วนนี้คืออาวุธหลักในการใช้ "โปะหนี้" เพื่ออิสรภาพทางการเงิน</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {activeTab === 'debts' && (
+                            <div className="space-y-6">
+                                <div className="flex justify-between items-center">
+                                    <h2 className="text-xl font-black uppercase italic">จัดการรายการหนี้</h2>
+                                    <button onClick={() => setDebts([...debts, { id: Date.now(), name: 'รายการใหม่', balance: 0, interestRate: 15, minPayment: 0 }])} className="px-4 py-2 bg-indigo-600 text-white rounded-xl text-xs font-black">+ เพิ่มรายการ</button>
+                                </div>
+                                <div className="space-y-4">
+                                    {debts.map((d, i) => (
+                                        <div key={d.id} className="bg-white p-6 rounded-[2rem] flex flex-col md:flex-row gap-4 items-center border">
+                                            <input value={d.name} onChange={e => { const nd = [...debts]; nd[i].name = e.target.value; setDebts(nd); }} className="flex-1 p-3 bg-slate-50 rounded-xl text-sm font-bold outline-none" />
+                                            <div className="w-32"><p className="text-[9px] font-black uppercase text-slate-400">ยอดหนี้</p><input type="number" value={d.balance} onChange={e => { const nd = [...debts]; nd[i].balance = e.target.value; setDebts(nd); }} className="w-full bg-transparent font-black outline-none" /></div>
+                                            <div className="w-20"><p className="text-[9px] font-black uppercase text-slate-400">ดอกเบี้ย%</p><input type="number" value={d.interestRate} onChange={e => { const nd = [...debts]; nd[i].interestRate = e.target.value; setDebts(nd); }} className="w-full bg-transparent font-black text-rose-500 outline-none" /></div>
+                                            <div className="w-32"><p className="text-[9px] font-black uppercase text-slate-400">ขั้นต่ำ</p><input type="number" value={d.minPayment} onChange={e => { const nd = [...debts]; nd[i].minPayment = e.target.value; setDebts(nd); }} className="w-full bg-transparent font-black outline-none" /></div>
+                                            <button onClick={() => setDebts(debts.filter(x => x.id !== d.id))} className="p-2 text-slate-300 hover:text-rose-500"><Icon name="trash-2" /></button>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        {activeTab === 'strategy' && (
+                            <div className="space-y-6">
+                                <div className="bg-white p-8 rounded-[2.5rem] border">
+                                    <h2 className="text-xl font-black uppercase mb-6 italic">กลยุทธ์การปลดหนี้</h2>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <button onClick={() => setStrategy('avalanche')} className={`p-6 rounded-[2rem] border-2 text-left ${strategy === 'avalanche' ? 'border-indigo-600 bg-indigo-50' : 'border-slate-100'}`}>
+                                            <h4 className="font-black mb-2">Debt Avalanche</h4>
+                                            <p className="text-xs text-slate-500">ลดดอกเบี้ยมากที่สุด (จ่ายดอกสูงก่อน)</p>
+                                        </button>
+                                        <button onClick={() => setStrategy('snowball')} className={`p-6 rounded-[2rem] border-2 text-left ${strategy === 'snowball' ? 'border-indigo-600 bg-indigo-50' : 'border-slate-100'}`}>
+                                            <h4 className="font-black mb-2">Debt Snowball</h4>
+                                            <p className="text-xs text-slate-500">สร้างกำลังใจ (จ่ายก้อนเล็กก่อน)</p>
+                                        </button>
+                                    </div>
+                                </div>
+                                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                                    <div className="bg-white p-8 rounded-[2.5rem] border">
+                                        <p className="text-[10px] font-black uppercase text-slate-400">โปะเพิ่มรายเดือน</p>
+                                        <div className="flex items-center gap-4 mt-2">
+                                            <input type="range" min="0" max="50000" step="500" value={extraPayment} onChange={e => setExtraPayment(Number(e.target.value))} className="flex-1 accent-indigo-600" />
+                                            <span className="font-black text-indigo-600">฿{extraPayment.toLocaleString()}</span>
+                                        </div>
+                                    </div>
+                                    <div className="lg:col-span-2 bg-white p-8 rounded-[2.5rem] border">
+                                        <div className="h-64"><canvas id="timelineChart"></canvas></div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
